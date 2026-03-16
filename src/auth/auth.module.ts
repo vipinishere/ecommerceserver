@@ -9,12 +9,14 @@ import { LocalStrategy } from './strategies';
 import { AdminModule } from '../admin';
 import { UsersModule } from '../users';
 import { OtpModule } from '../otp';
+import { SellerModule } from '../seller';
 
 @Module({
   imports: [
     AdminModule,
     UsersModule,
     OtpModule,
+    SellerModule,
     JwtModule.registerAsync({
       useFactory: (config: ConfigType<typeof jwtConfigFactory>) => ({
         secret: config.secret,

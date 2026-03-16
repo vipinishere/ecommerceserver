@@ -41,6 +41,9 @@ import {
   ResetPasswordRequestDto,
   SendCodeRequestDto,
   LoginRequestDto,
+  SendCodeRequestType,
+  RegisterSellerDto,
+  SellerSendCodeDto,
 } from './dto';
 import { SendCodeResponse } from '../otp';
 import { OtpTransport } from '../generated/prisma/client';
@@ -110,6 +113,7 @@ export class AuthController extends BaseController {
     });
   }
 
+  // send code for user and admin
   @Post('send-code')
   async sendCode(@Body() data: SendCodeRequestDto) {
     if (data.mobile && !data.country) {
@@ -135,6 +139,17 @@ export class AuthController extends BaseController {
     return response;
   }
 
+  // send code for seller only
+  @Post('seller/send-code')
+  sellerSendCode(@Body() dto: SellerSendCodeDto) {
+    return this.authService.sendCode(
+      dto.contactEmail,
+      OtpTransport.Email, // seller ke liye sirf email
+      SendCodeRequestType.Register,
+    );
+  }
+
+  // register user
   @Post('register')
   async register(
     @Res({ passthrough: true }) res: Response,
@@ -168,11 +183,35 @@ export class AuthController extends BaseController {
     return { accessToken, expiresIn, type };
   }
 
+  // Register
+  @Post('seller/register')
+  sellerRegister(@Body() dto: RegisterSellerDto) {
+    return this.authService.registerSeller(dto);
+  }
+
+  // User / Admin login
   @ApiBody({ type: () => LoginRequestDto })
   @UseGuards(LocalAuthGuard)
   @HttpCode(200)
   @Post('login')
   async login(
+    @Req() req: Request & { user: ValidatedUser },
+    @Res({ passthrough: true }) res: Response,
+  ) {
+    const { accessToken, expiresIn, type } = await this.authService.login(
+      req.user.id,
+      req.user.type,
+    );
+    this.setAuthCookie(res, accessToken, type, expiresIn);
+    return { accessToken, expiresIn, type };
+  }
+
+  // Seller login route
+  @ApiBody({ type: () => LoginRequestDto })
+  @UseGuards(LocalAuthGuard) // same guard, LocalStrategy sab check karta hai
+  @HttpCode(200)
+  @Post('seller/login')
+  async sellerLogin(
     @Req() req: Request & { user: ValidatedUser },
     @Res({ passthrough: true }) res: Response,
   ) {

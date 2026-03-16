@@ -10,6 +10,7 @@ import {
   VerifyCodeResponse,
 } from '../otp';
 import { OtpTransport, User } from '../generated/prisma/client';
+import { SellerService } from '../seller/seller.service';
 
 export type ValidAuthResponse = {
   accessToken: string;
@@ -28,6 +29,7 @@ export class AuthService {
     private readonly jwtService: JwtService,
     private readonly usersService: UsersService,
     private readonly otpService: OtpService,
+    private readonly sellerService: SellerService,
   ) {}
 
   private async generateJwt(
@@ -141,6 +143,47 @@ export class AuthService {
       accessToken: token,
       expiresIn,
       type: UserType.User,
+    };
+  }
+
+  async registerSeller(data: {
+    businessName: string;
+    contactEmail: string;
+    dialCode: string;
+    contactPhone: string;
+    password: string;
+    emailVerificationCode: string;
+  }): Promise<InvalidVerifyCodeResponse | ValidAuthResponse> {
+    // OTP verify karo
+    const verifyEmailOtpResponse = await this.otpService.verify(
+      data.emailVerificationCode,
+      data.contactEmail,
+      OtpTransport.Email,
+    );
+
+    if (!verifyEmailOtpResponse.status) {
+      return { email: verifyEmailOtpResponse };
+    }
+
+    // Seller create karo
+    const seller = await this.sellerService.create({
+      businessName: data.businessName,
+      contactEmail: data.contactEmail,
+      dialCode: data.dialCode,
+      contactPhone: data.contactPhone,
+      password: data.password,
+    });
+
+    // JWT generate karo
+    const { token, expiresIn } = await this.generateJwt({
+      sub: seller.id,
+      type: UserType.Seller,
+    });
+
+    return {
+      accessToken: token,
+      expiresIn,
+      type: UserType.Seller,
     };
   }
 

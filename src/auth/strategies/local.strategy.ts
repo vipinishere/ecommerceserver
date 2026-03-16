@@ -5,12 +5,14 @@ import { ValidatedUser } from '@Common';
 import { LOCAL_AUTH } from '../auth.constants';
 import { UsersService } from '../../users';
 import { AdminService } from '../../admin';
+import { SellerService } from '../../seller/seller.service';
 
 @Injectable()
 export class LocalStrategy extends PassportStrategy(Strategy, LOCAL_AUTH) {
   constructor(
     private readonly usersService: UsersService,
     private readonly adminService: AdminService,
+    private readonly sellerService: SellerService,
   ) {
     super({
       usernameField: 'email',
@@ -22,6 +24,9 @@ export class LocalStrategy extends PassportStrategy(Strategy, LOCAL_AUTH) {
     user = await this.usersService.validateCredentials(email, password);
     if (user === null) {
       user = await this.adminService.validateCredentials(email, password);
+    }
+    if (user === null) {
+      user = await this.sellerService.validateCredentials(email, password);
     }
     if (user) return user;
     if (user === false) throw new UnauthorizedException('Incorrect password');
