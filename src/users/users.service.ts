@@ -25,6 +25,7 @@ import {
   UserMeta,
   UserStatus,
 } from '../generated/prisma/client';
+import { WalletService } from 'src/wallet/wallet.service';
 
 @Injectable()
 export class UsersService {
@@ -36,6 +37,7 @@ export class UsersService {
     private readonly utilsService: UtilsService,
     private readonly storageService: StorageService,
     private readonly otpService: OtpService,
+    private readonly walletService: WalletService,
   ) {}
 
   private getProfileImageUrl(profileImage: string): string {
@@ -186,7 +188,7 @@ export class UsersService {
       passwordHash = hash;
     }
 
-    return await this.prisma.user.create({
+    const user = await this.prisma.user.create({
       data: {
         firstname: data.firstname,
         lastname: data.lastname,
@@ -202,6 +204,10 @@ export class UsersService {
         },
       },
     });
+
+    await this.walletService.createWalletAccount(user.id);
+
+    return user;
   }
 
   async getProfile(userId: string): Promise<User> {

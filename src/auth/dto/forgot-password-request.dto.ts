@@ -1,8 +1,11 @@
-import { ApiPropertyOptional } from '@nestjs/swagger';
+import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
 import { IsEmail, IsOptional, IsPhoneNumber } from 'class-validator';
 
 export class ForgotPasswordRequestDto {
   @ApiPropertyOptional()
+  @ApiProperty({
+    example: '+919876543210',
+  })
   @IsOptional()
   @IsPhoneNumber(undefined, {
     message:

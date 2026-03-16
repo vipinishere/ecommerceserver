@@ -11,12 +11,21 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import {
+  ApiBearerAuth,
+  ApiOperation,
+  ApiParam,
+  ApiResponse,
+  ApiTags,
+} from '@nestjs/swagger';
 import {
   AccessGuard,
   AuthenticatedRequest,
   BaseController,
   JwtAuthGuard,
+  Roles,
+  RolesGuard,
+  UserType,
 } from '@Common';
 import { CartService } from './cart.service';
 import { AddToCartRequestDto, UpdateCartRequestDto } from './dto';
@@ -32,6 +41,8 @@ export class CartController extends BaseController {
 
   // POST /cart
   @Post()
+  @Roles(UserType.User)
+  @UseGuards(RolesGuard)
   addToCart(
     @Req() req: AuthenticatedRequest,
     @Body() dto: AddToCartRequestDto,
@@ -42,12 +53,16 @@ export class CartController extends BaseController {
 
   // GET /cart
   @Get()
+  @Roles(UserType.User)
+  @UseGuards(RolesGuard)
   getCart(@Req() req: AuthenticatedRequest) {
     const ctx = this.getContext(req);
     return this.cartService.getCart(ctx.user.id);
   }
 
   // PATCH /cart/:itemId
+  @Roles(UserType.User)
+  @UseGuards(RolesGuard)
   @Patch(':itemId')
   updateQuantity(
     @Req() req: AuthenticatedRequest,
@@ -59,6 +74,11 @@ export class CartController extends BaseController {
   }
 
   // DELETE /cart/:itemId
+  @ApiOperation({ summary: 'Remove item from cart' })
+  @ApiParam({ name: 'variantId', description: 'Variant ID' })
+  @ApiResponse({ status: 200, description: 'Item removed' })
+  @Roles(UserType.User)
+  @UseGuards(RolesGuard)
   @Delete(':itemId')
   @HttpCode(HttpStatus.OK)
   removeItem(
@@ -70,6 +90,8 @@ export class CartController extends BaseController {
   }
 
   // DELETE /cart
+  @Roles(UserType.User)
+  @UseGuards(RolesGuard)
   @Delete()
   @HttpCode(HttpStatus.OK)
   clearCart(@Req() req: AuthenticatedRequest) {
