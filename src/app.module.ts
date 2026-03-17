@@ -20,6 +20,7 @@ import { SellerModule } from './seller';
 import { AddressModule } from './address/address.module';
 import { AdminModule } from './admin';
 import { UsersModule } from './users';
+import { WishlistModule } from './wishlist';
 
 @Module({
   imports: [
@@ -50,6 +51,7 @@ import { UsersModule } from './users';
     AddressModule,
     SellerModule,
     ProductModule,
+    WishlistModule,
   ],
   controllers: [AppController],
   providers: [
