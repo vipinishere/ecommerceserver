@@ -14,6 +14,12 @@ import { PrismaModule } from './prisma';
 import { AuthModule } from './auth';
 import { RedisModule } from './redis';
 import { CartModule } from './cart';
+import { ProductModule } from './product/product.module';
+import { WalletModule } from './wallet';
+import { SellerModule } from './seller';
+import { AddressModule } from './address/address.module';
+import { AdminModule } from './admin';
+import { UsersModule } from './users';
 
 @Module({
   imports: [
@@ -37,7 +43,13 @@ import { CartModule } from './cart';
     PrismaModule,
     RedisModule,
     AuthModule,
+    AdminModule,
+    UsersModule,
     CartModule,
+    WalletModule,
+    AddressModule,
+    SellerModule,
+    ProductModule,
   ],
   controllers: [AppController],
   providers: [
