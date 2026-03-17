@@ -14,6 +14,7 @@ import { PrismaModule } from './prisma';
 import { AuthModule } from './auth';
 import { RedisModule } from './redis';
 import { CartModule } from './cart';
+import { ReviewModule } from './review';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { CartModule } from './cart';
     RedisModule,
     AuthModule,
     CartModule,
+    ReviewModule,
   ],
   controllers: [AppController],
   providers: [
