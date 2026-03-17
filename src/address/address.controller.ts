@@ -29,7 +29,7 @@ import {
 import { AddressService } from './address.service';
 import { AddressResponse } from './address.reponse';
 import { CreateAddressDto } from './dto/create-address-request.dto';
-import { UpdateAddressRequestDto } from './dto/update-address-request';
+import { UpdateAddressRequestDto } from './dto/update-address-request.dto';
 
 @ApiTags('Address')
 @ApiBearerAuth()
