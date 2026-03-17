@@ -15,6 +15,13 @@ import { AuthModule } from './auth';
 import { RedisModule } from './redis';
 import { CartModule } from './cart';
 import { ReviewModule } from './review';
+import { ProductModule } from './product/product.module';
+import { WalletModule } from './wallet';
+import { SellerModule } from './seller';
+import { AddressModule } from './address/address.module';
+import { AdminModule } from './admin';
+import { UsersModule } from './users';
+import { WishlistModule } from './wishlist';
 
 @Module({
   imports: [
@@ -38,8 +45,15 @@ import { ReviewModule } from './review';
     PrismaModule,
     RedisModule,
     AuthModule,
+    AdminModule,
+    UsersModule,
     CartModule,
     ReviewModule,
+    WalletModule,
+    AddressModule,
+    SellerModule,
+    ProductModule,
+    WishlistModule,
   ],
   controllers: [AppController],
   providers: [
