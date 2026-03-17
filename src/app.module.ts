@@ -14,6 +14,7 @@ import { PrismaModule } from './prisma';
 import { AuthModule } from './auth';
 import { RedisModule } from './redis';
 import { CartModule } from './cart';
+import { ReviewModule } from './review';
 import { ProductModule } from './product/product.module';
 import { WalletModule } from './wallet';
 import { SellerModule } from './seller';
@@ -47,6 +48,7 @@ import { WishlistModule } from './wishlist';
     AdminModule,
     UsersModule,
     CartModule,
+    ReviewModule,
     WalletModule,
     AddressModule,
     SellerModule,
