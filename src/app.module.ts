@@ -22,6 +22,7 @@ import { AddressModule } from './address/address.module';
 import { AdminModule } from './admin';
 import { UsersModule } from './users';
 import { WishlistModule } from './wishlist';
+import { WatchHistoryModule } from './watchhistory';
 
 @Module({
   imports: [
@@ -54,6 +55,7 @@ import { WishlistModule } from './wishlist';
     SellerModule,
     ProductModule,
     WishlistModule,
+    WatchHistoryModule,
   ],
   controllers: [AppController],
   providers: [
