@@ -24,6 +24,7 @@ import { UsersModule } from './users';
 import { WishlistModule } from './wishlist';
 import { WatchHistoryModule } from './watchhistory';
 import { OrderModule } from './order';
+import { CategoryModule } from './category';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { OrderModule } from './order';
     WishlistModule,
     WatchHistoryModule,
     OrderModule,
+    CategoryModule,
   ],
   controllers: [AppController],
   providers: [
