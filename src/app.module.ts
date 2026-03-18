@@ -23,6 +23,7 @@ import { AdminModule } from './admin';
 import { UsersModule } from './users';
 import { WishlistModule } from './wishlist';
 import { WatchHistoryModule } from './watchhistory';
+import { OrderModule } from './order';
 
 @Module({
   imports: [
@@ -56,6 +57,7 @@ import { WatchHistoryModule } from './watchhistory';
     ProductModule,
     WishlistModule,
     WatchHistoryModule,
+    OrderModule,
   ],
   controllers: [AppController],
   providers: [
