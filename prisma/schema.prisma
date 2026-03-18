@@ -584,6 +584,15 @@ model Shipment {
   @@map("shipment")
 }
 
+model ShipmentToken {
+  id        String   @id @default(uuid())
+  token     String
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("shipment_token")
+}
+
 model ShipmentTrackingEvent {
   id          String   @id @default(uuid())
   shipmentId  String   @map("shipment_id")
