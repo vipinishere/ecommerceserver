@@ -10,3 +10,4 @@ export * from './storage.config';
 export * from './auth.config';
 export * from './google.config';
 export * from './shipment.config';
+export * from './razorpay.config';
