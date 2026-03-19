@@ -25,6 +25,7 @@ import { WishlistModule } from './wishlist';
 import { WatchHistoryModule } from './watchhistory';
 import { OrderModule } from './order';
 import { CategoryModule } from './category';
+import { ShipmentModule } from './shipment';
 
 @Module({
   imports: [
@@ -60,6 +61,7 @@ import { CategoryModule } from './category';
     WatchHistoryModule,
     OrderModule,
     CategoryModule,
+    ShipmentModule,
   ],
   controllers: [AppController],
   providers: [
