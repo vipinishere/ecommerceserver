@@ -725,6 +725,9 @@ model TransactionDetail {
   transactionId     String            @unique @map("transaction_id")
   transactionRefId  String?           @map("transaction_ref_id")
   transactionStatus TransactionStatus @map("transaction_status")
+  razorpayOrderId   String?           @map("razorpay_order_id")
+  razorpayPaymentId String?           @map("razorpay_payment_id")
+  razorpaySignature String?           @map("razorpay_signature")
   createdAt         DateTime          @default(now()) @map("created_at")
   updatedAt         DateTime          @updatedAt @map("updated_at")
 

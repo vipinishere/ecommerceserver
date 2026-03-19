@@ -8,6 +8,7 @@ import {
   Prisma,
 } from '../generated/prisma/client';
 import { ShipmentService } from 'src/shipment';
+import { PaymentService } from 'src/payment';
 
 @Injectable()
 export class OrderService {
@@ -15,6 +16,7 @@ export class OrderService {
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
     private readonly shipmentService: ShipmentService,
+    private readonly paymentService: PaymentService,
   ) {}
 
   // =====================
@@ -37,36 +39,28 @@ export class OrderService {
     data: {
       addressId: string;
       paymentType: PaymentType;
-      paymentMethodId?: string;
-      transactionId?: string;
     },
   ) {
-    // Step 1: Cart items fetch karo
+    // Step 1: Cart items fetch
     const cartItems = await this.prisma.cartItem.findMany({
       where: { userId },
-      include: {
-        product: true,
-        variant: true,
-      },
+      include: { product: true, variant: true },
     });
+    if (cartItems.length === 0) throw new Error('Cart is empty');
 
-    if (cartItems.length === 0) {
-      throw new Error('Cart is empty');
-    }
-
-    // Step 2: Address validate karo
+    // Step 2: Address validate
     const address = await this.prisma.address.findUniqueOrThrow({
       where: { id: data.addressId, userId },
     });
 
-    // Step 3: Stock check karo
+    // Step 3: Stock check
     for (const item of cartItems) {
       if (item.variant.stockQuantity < item.quantity) {
         throw new Error(`Insufficient stock for ${item.product.internalName}`);
       }
     }
 
-    // Step 4: Amounts calculate karo
+    // Step 4: Amounts calculate
     const totalItemsAmount = cartItems.reduce(
       (sum, item) => sum + Number(item.variant.sellingPrice) * item.quantity,
       0,
@@ -75,18 +69,17 @@ export class OrderService {
     const codFee = data.paymentType === PaymentType.COD ? 25 : 0;
     const grandTotal = totalItemsAmount + shippingCharge + codFee;
 
-    return await this.prisma.$transaction(async (tx) => {
-      // Step 5: Wallet payment check
-      if (data.paymentType === PaymentType.WALLET) {
-        await this.walletService.deductForOrder(
-          userId,
-          grandTotal,
-          'temp', // order id baad mein update hoga
-          tx,
-        );
+    // Step 5: Wallet balance check
+    if (data.paymentType === PaymentType.WALLET) {
+      const wallet = await this.walletService.getWalletByUserId(userId);
+      if (Number(wallet.currentBalance) < grandTotal) {
+        throw new Error('Insufficient wallet balance');
       }
+    }
 
-      // Step 6: Order create karo
+    // Step 6: DB transaction
+    const order = await this.prisma.$transaction(async (tx) => {
+      // Order create karo
       const order = await tx.order.create({
         data: {
           orderNumber: this.generateOrderNumber(),
@@ -97,8 +90,7 @@ export class OrderService {
           codFee,
           grandTotal,
           placedAt: new Date(),
-          paidAt: data.paymentType !== PaymentType.COD ? new Date() : null,
-          // Order items
+          paidAt: data.paymentType === PaymentType.WALLET ? new Date() : null,
           items: {
             create: cartItems.map((item) => ({
               productId: item.productId,
@@ -112,101 +104,107 @@ export class OrderService {
             })),
           },
         },
-        include: {
-          items: true,
-        },
+        include: { items: true },
       });
 
-      // Step 7: Wallet transaction mein order id update karo
-      if (data.paymentType === PaymentType.WALLET) {
-        await tx.walletTransaction.updateMany({
-          where: {
-            wallet: { userId },
-            referenceId: 'temp',
-          },
-          data: { referenceId: order.id },
-        });
-      }
-
-      // Step 8: Payment record banao
-      if (
-        data.paymentType !== PaymentType.COD &&
-        data.paymentMethodId &&
-        data.transactionId
-      ) {
-        const transactionDetail = await tx.transactionDetail.create({
-          data: {
+      // Payment type handle karo
+      switch (data.paymentType) {
+        case PaymentType.WALLET:
+          // Wallet se deduct karo
+          await this.walletService.deductForOrder(
             userId,
-            paymentMethodId: data.paymentMethodId,
-            transactionId: data.transactionId,
-            transactionStatus: 'SUCCESS',
-          },
-        });
+            grandTotal,
+            order.id,
+            tx,
+          );
+          break;
 
-        await tx.orderPayment.create({
-          data: {
-            orderId: order.id,
-            paymentMethodId: data.paymentMethodId,
-            transactionDetailId: transactionDetail.id,
-            amount: grandTotal,
-            paidAt: new Date(),
-          },
-        });
+        case PaymentType.COD:
+        case PaymentType.CARD:
+        case PaymentType.UPI:
+          // COD — delivery pe payment
+          // CARD/UPI — Razorpay verify ke baad PaymentService handle karega
+          break;
       }
 
-      // Step 9: Stock reduce karo
+      // Stock reduce karo
       for (const item of cartItems) {
         await tx.productVariant.update({
           where: { id: item.variantId },
-          data: {
-            stockQuantity: { decrement: item.quantity },
-          },
+          data: { stockQuantity: { decrement: item.quantity } },
         });
       }
 
-      // Step 10: Shipment create karo
-      const shipmentResponse = await this.shipmentService.createShipment({
-        orderId: order.id,
-        orderNumber: order.orderNumber,
-        address: {
-          name: address.name,
-          phone: address.phoneNumber,
-          addressLine1: address.addressLine1,
-          city: address.city,
-          state: address.state,
-          postalCode: address.postalCode,
-          country: address.country,
-        },
-        items: cartItems.map((item) => ({
-          name: item.product.internalName,
-          sku: item.variant.sku,
-          quantity: item.quantity,
-          price: Number(item.variant.sellingPrice),
-        })),
-        grandTotal: Number(grandTotal),
-      });
-
-      await tx.shipment.create({
-        data: {
-          orderId: order.id,
-          trackingNumber:
-            shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
-          carrier: shipmentResponse.courier_company_id
-            ? String(shipmentResponse.courier_company_id)
-            : 'Pending',
-          status: ShipmentStatus.PROCESSING,
-        },
-      });
-
-      // Step 11: Cart clear karo
+      // Cart clear karo
       await tx.cartItem.deleteMany({ where: { userId } });
 
       return order;
     });
+
+    // Step 7: Shipment create karo (transaction ke bahar)
+    const shipmentResponse = await this.shipmentService.createShipment({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      address: {
+        name: address.name,
+        phone: address.phoneNumber,
+        addressLine1: address.addressLine1,
+        city: address.city,
+        state: address.state,
+        postalCode: address.postalCode,
+        country: address.country,
+      },
+      items: cartItems.map((item) => ({
+        name: item.product.internalName,
+        sku: item.variant.sku,
+        quantity: item.quantity,
+        price: Number(item.variant.sellingPrice),
+      })),
+      grandTotal,
+    });
+
+    await this.prisma.shipment.create({
+      data: {
+        orderId: order.id,
+        trackingNumber: shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
+        carrier: shipmentResponse.courier_company_id
+          ? String(shipmentResponse.courier_company_id)
+          : 'Pending',
+        status: ShipmentStatus.PROCESSING,
+      },
+    });
+
+    // Step 8: CARD/UPI — Razorpay order create
+    if (
+      data.paymentType === PaymentType.CARD ||
+      data.paymentType === PaymentType.UPI
+    ) {
+      const razorpayOrder = await this.paymentService.createPaymentOrder(
+        userId,
+        order.id,
+        data.paymentType === PaymentType.CARD ? 'CARD' : 'UPI',
+      );
+
+      return {
+        order,
+        payment: {
+          required: true,
+          ...razorpayOrder,
+        },
+      };
+    }
+
+    return {
+      order,
+      payment: {
+        required: false,
+        type: data.paymentType,
+      },
+    };
   }
 
   // =====================
-  // User ke orders
+  // User orders
   // =====================
   async getUserOrders(
     userId: string,

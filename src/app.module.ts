@@ -26,6 +26,7 @@ import { WatchHistoryModule } from './watchhistory';
 import { OrderModule } from './order';
 import { CategoryModule } from './category';
 import { ShipmentModule } from './shipment';
+import { PaymentModule } from './payment';
 
 @Module({
   imports: [
@@ -62,6 +63,7 @@ import { ShipmentModule } from './shipment';
     OrderModule,
     CategoryModule,
     ShipmentModule,
+    PaymentModule,
   ],
   controllers: [AppController],
   providers: [
