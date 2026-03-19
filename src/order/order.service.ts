@@ -7,12 +7,14 @@ import {
   ShipmentStatus,
   Prisma,
 } from '../generated/prisma/client';
+import { ShipmentService } from 'src/shipment';
 
 @Injectable()
 export class OrderService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly walletService: WalletService,
+    private readonly shipmentService: ShipmentService,
   ) {}
 
   // =====================
@@ -53,7 +55,7 @@ export class OrderService {
     }
 
     // Step 2: Address validate karo
-    await this.prisma.address.findUniqueOrThrow({
+    const address = await this.prisma.address.findUniqueOrThrow({
       where: { id: data.addressId, userId },
     });
 
@@ -163,11 +165,35 @@ export class OrderService {
       }
 
       // Step 10: Shipment create karo
+      const shipmentResponse = await this.shipmentService.createShipment({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        address: {
+          name: address.name,
+          phone: address.phoneNumber,
+          addressLine1: address.addressLine1,
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          country: address.country,
+        },
+        items: cartItems.map((item) => ({
+          name: item.product.internalName,
+          sku: item.variant.sku,
+          quantity: item.quantity,
+          price: Number(item.variant.sellingPrice),
+        })),
+        grandTotal: Number(grandTotal),
+      });
+
       await tx.shipment.create({
         data: {
           orderId: order.id,
-          trackingNumber: `TRK-${order.orderNumber}`,
-          carrier: 'Pending',
+          trackingNumber:
+            shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
+          carrier: shipmentResponse.courier_company_id
+            ? String(shipmentResponse.courier_company_id)
+            : 'Pending',
           status: ShipmentStatus.PROCESSING,
         },
       });
