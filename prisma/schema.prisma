@@ -90,12 +90,13 @@ enum ShipmentStatus {
 }
 
 enum OrderStatus {
-  PENDING   @map("pending")
-  PACKED    @map("packed")
-  SHIPPED   @map("shipped")
-  DELIVERED @map("delivered")
-  CANCELLED @map("cancelled")
-  RETURNED  @map("returned")
+  AWAITING_PAYMENT @map("awaiting_payment")
+  PENDING          @map("pending")
+  PACKED           @map("packed")
+  SHIPPED          @map("shipped")
+  DELIVERED        @map("delivered")
+  CANCELLED        @map("cancelled")
+  RETURNED         @map("returned")
 
   @@map("order_status")
 }
@@ -221,7 +222,8 @@ model Address {
   createdAt              DateTime @default(now()) @map("created_at")
   updatedAt              DateTime @updatedAt @map("updated_at")
 
-  user User @relation(fields: [userId], references: [id])
+  user   User    @relation(fields: [userId], references: [id])
+  orders Order[]
 
   @@index([userId])
   @@map("address")
@@ -521,6 +523,7 @@ model Order {
   id               String      @id @default(uuid())
   orderNumber      String      @unique @map("order_number")
   userId           String      @map("user_id")
+  addressId        String      @map("address_id")
   orderStatus      OrderStatus @default(PENDING) @map("order_status")
   totalItemsAmount Decimal     @map("total_items_amount") @db.Decimal(10, 2)
   shippingCharge   Decimal     @map("shipping_charge") @db.Decimal(10, 2)
@@ -534,6 +537,7 @@ model Order {
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
   user      User           @relation(fields: [userId], references: [id])
+  address   Address        @relation(fields: [addressId], references: [id])
   items     OrderItem[]
   shipments Shipment[]
   payments  OrderPayment[]
