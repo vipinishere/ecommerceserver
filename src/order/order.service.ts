@@ -7,8 +7,17 @@ import {
   ShipmentStatus,
   Prisma,
 } from '../generated/prisma/client';
-import { ShipmentService } from 'src/shipment';
-import { PaymentService } from 'src/payment';
+import { ShipmentService } from '../shipment';
+import { PaymentService } from '../payment';
+
+type CalculatedOrder = {
+  cartItems: any[];
+  address: any;
+  totalItemsAmount: number;
+  shippingCharge: number;
+  codFee: number;
+  grandTotal: number;
+};
 
 @Injectable()
 export class OrderService {
@@ -32,175 +41,302 @@ export class OrderService {
   }
 
   // =====================
-  // Order place karo (cart se)
+  // Validate + Calculate
   // =====================
-  async placeOrder(
+  private async validateAndCalculate(
     userId: string,
-    data: {
-      addressId: string;
-      paymentType: PaymentType;
-    },
-  ) {
-    // Step 1: Cart items fetch
+    addressId: string,
+    paymentType: PaymentType,
+  ): Promise<CalculatedOrder> {
     const cartItems = await this.prisma.cartItem.findMany({
       where: { userId },
       include: { product: true, variant: true },
     });
     if (cartItems.length === 0) throw new Error('Cart is empty');
 
-    // Step 2: Address validate
     const address = await this.prisma.address.findUniqueOrThrow({
-      where: { id: data.addressId, userId },
+      where: { id: addressId, userId },
     });
 
-    // Step 3: Stock check
     for (const item of cartItems) {
       if (item.variant.stockQuantity < item.quantity) {
         throw new Error(`Insufficient stock for ${item.product.internalName}`);
       }
     }
 
-    // Step 4: Amounts calculate
     const totalItemsAmount = cartItems.reduce(
       (sum, item) => sum + Number(item.variant.sellingPrice) * item.quantity,
       0,
     );
     const shippingCharge = totalItemsAmount > 500 ? 0 : 50;
-    const codFee = data.paymentType === PaymentType.COD ? 25 : 0;
+    const codFee = paymentType === PaymentType.COD ? 25 : 0;
     const grandTotal = totalItemsAmount + shippingCharge + codFee;
 
-    // Step 5: Wallet balance check
-    if (data.paymentType === PaymentType.WALLET) {
+    if (paymentType === PaymentType.WALLET) {
       const wallet = await this.walletService.getWalletByUserId(userId);
       if (Number(wallet.currentBalance) < grandTotal) {
         throw new Error('Insufficient wallet balance');
       }
     }
 
-    // Step 6: DB transaction
+    return {
+      cartItems,
+      address,
+      grandTotal,
+      totalItemsAmount,
+      shippingCharge,
+      codFee,
+    };
+  }
+
+  // =====================
+  // COD handler
+  // =====================
+  private async handleCodOrder(
+    userId: string,
+    addressId: string,
+    data: CalculatedOrder,
+  ) {
     const order = await this.prisma.$transaction(async (tx) => {
-      // Order create karo
-      const order = await tx.order.create({
-        data: {
-          orderNumber: this.generateOrderNumber(),
-          userId,
-          orderStatus: OrderStatus.PENDING,
-          totalItemsAmount,
-          shippingCharge,
-          codFee,
-          grandTotal,
-          placedAt: new Date(),
-          paidAt: data.paymentType === PaymentType.WALLET ? new Date() : null,
-          items: {
-            create: cartItems.map((item) => ({
-              productId: item.productId,
-              sellerId: item.product.sellerId,
-              variantId: item.variantId,
-              productNameSnapshot: item.product.internalName,
-              productSkuSnapshot: item.variant.sku,
-              quantity: item.quantity,
-              unitPriceAtPurchase: item.variant.sellingPrice,
-              totalPrice: Number(item.variant.sellingPrice) * item.quantity,
-            })),
-          },
-        },
-        include: { items: true },
+      const order = await this.createOrderInDb(tx, userId, addressId, {
+        ...data,
+        orderStatus: OrderStatus.PENDING,
+        paidAt: null,
       });
-
-      // Payment type handle karo
-      switch (data.paymentType) {
-        case PaymentType.WALLET:
-          // Wallet se deduct karo
-          await this.walletService.deductForOrder(
-            userId,
-            grandTotal,
-            order.id,
-            tx,
-          );
-          break;
-
-        case PaymentType.COD:
-        case PaymentType.CARD:
-        case PaymentType.UPI:
-          // COD — delivery pe payment
-          // CARD/UPI — Razorpay verify ke baad PaymentService handle karega
-          break;
-      }
-
-      // Stock reduce karo
-      for (const item of cartItems) {
-        await tx.productVariant.update({
-          where: { id: item.variantId },
-          data: { stockQuantity: { decrement: item.quantity } },
-        });
-      }
-
-      // Cart clear karo
-      await tx.cartItem.deleteMany({ where: { userId } });
-
+      await this.reduceStockAndClearCart(tx, userId, data.cartItems);
       return order;
     });
 
-    // Step 7: Shipment create karo (transaction ke bahar)
-    const shipmentResponse = await this.shipmentService.createShipment({
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      address: {
-        name: address.name,
-        phone: address.phoneNumber,
-        addressLine1: address.addressLine1,
-        city: address.city,
-        state: address.state,
-        postalCode: address.postalCode,
-        country: address.country,
-      },
-      items: cartItems.map((item) => ({
-        name: item.product.internalName,
-        sku: item.variant.sku,
-        quantity: item.quantity,
-        price: Number(item.variant.sellingPrice),
-      })),
-      grandTotal,
-    });
+    await this.createShipmentForOrder(
+      order,
+      data.address,
+      data.cartItems,
+      data.grandTotal,
+    );
 
-    await this.prisma.shipment.create({
-      data: {
-        orderId: order.id,
-        trackingNumber: shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
-        carrier: shipmentResponse.courier_company_id
-          ? String(shipmentResponse.courier_company_id)
-          : 'Pending',
-        status: ShipmentStatus.PROCESSING,
-      },
-    });
+    return {
+      order,
+      payment: { required: false, type: PaymentType.COD },
+    };
+  }
 
-    // Step 8: CARD/UPI — Razorpay order create
-    if (
-      data.paymentType === PaymentType.CARD ||
-      data.paymentType === PaymentType.UPI
-    ) {
-      const razorpayOrder = await this.paymentService.createPaymentOrder(
+  // =====================
+  // Wallet handler
+  // =====================
+  private async handleWalletOrder(
+    userId: string,
+    addressId: string,
+    data: CalculatedOrder,
+  ) {
+    const order = await this.prisma.$transaction(async (tx) => {
+      const order = await this.createOrderInDb(tx, userId, addressId, {
+        ...data,
+        orderStatus: OrderStatus.PENDING,
+        paidAt: new Date(),
+      });
+
+      await this.walletService.deductForOrder(
         userId,
+        data.grandTotal,
         order.id,
-        data.paymentType === PaymentType.CARD ? 'CARD' : 'UPI',
+        tx,
       );
 
-      return {
-        order,
-        payment: {
-          required: true,
-          ...razorpayOrder,
-        },
-      };
-    }
+      await this.reduceStockAndClearCart(tx, userId, data.cartItems);
+      return order;
+    });
+
+    await this.createShipmentForOrder(
+      order,
+      data.address,
+      data.cartItems,
+      data.grandTotal,
+    );
+
+    return {
+      order,
+      payment: { required: false, type: PaymentType.WALLET },
+    };
+  }
+
+  // =====================
+  // Card/UPI handler
+  // =====================
+  private async handlePrepaidOrder(
+    userId: string,
+    addressId: string,
+    paymentType: PaymentType,
+    data: CalculatedOrder,
+  ) {
+    const order = await this.prisma.$transaction(async (tx) => {
+      const order = await this.createOrderInDb(tx, userId, addressId, {
+        ...data,
+        orderStatus: OrderStatus.AWAITING_PAYMENT,
+        paidAt: null,
+      });
+      await this.reduceStockAndClearCart(tx, userId, data.cartItems);
+      return order;
+    });
+
+    const razorpayOrder = await this.paymentService.createPaymentOrder(
+      userId,
+      order.id,
+      paymentType === PaymentType.CARD ? 'CARD' : 'UPI',
+    );
 
     return {
       order,
       payment: {
-        required: false,
-        type: data.paymentType,
+        required: true,
+        ...razorpayOrder,
       },
     };
+  }
+
+  // =====================
+  // Complete payment (Card/UPI verify + shipment)
+  // =====================
+  async completePayment(data: {
+    razorpayOrderId: string;
+    razorpayPaymentId: string;
+    razorpaySignature: string;
+    orderId: string;
+    userId: string;
+  }) {
+    // Step 1: PaymentService se verify + markOrderPaid()
+    await this.paymentService.verifyPayment(data);
+
+    // Step 2: Order + address + items fetch
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: data.orderId, userId: data.userId },
+      include: {
+        items: {
+          include: { product: true, variant: true },
+        },
+        address: true,
+      },
+    });
+
+    // Step 3: Shipment create karo
+    await this.createShipmentForOrder(
+      order,
+      order.address,
+      order.items,
+      Number(order.grandTotal),
+    );
+
+    return { success: true, message: 'Payment verified successfully' };
+  }
+
+  // =====================
+  // Place order (main entry)
+  // =====================
+  async placeOrder(
+    userId: string,
+    data: { addressId: string; paymentType: PaymentType },
+  ) {
+    const calculated = await this.validateAndCalculate(
+      userId,
+      data.addressId,
+      data.paymentType,
+    );
+
+    switch (data.paymentType) {
+      case PaymentType.COD:
+        return await this.handleCodOrder(userId, data.addressId, calculated);
+
+      case PaymentType.WALLET:
+        return await this.handleWalletOrder(userId, data.addressId, calculated);
+
+      case PaymentType.CARD:
+      case PaymentType.UPI:
+        return await this.handlePrepaidOrder(
+          userId,
+          data.addressId,
+          data.paymentType,
+          calculated,
+        );
+
+      default:
+        throw new Error('Invalid payment type');
+    }
+  }
+
+  // ================
+  // Retry Payment for Order
+  // ================
+  async retryPaymentForOrder(
+    orderId: string,
+    userId: string,
+    paymentType: 'CARD' | 'UPI',
+  ) {
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId, userId },
+    });
+
+    // Sirf AWAITING_PAYMENT order retry ho sakta hai
+    if (order.orderStatus !== OrderStatus.AWAITING_PAYMENT) {
+      throw new Error('Order is not awaiting payment');
+    }
+
+    // Naya Razorpay order create karo
+    const razorpayOrder = await this.paymentService.createPaymentOrder(
+      userId,
+      orderId,
+      paymentType,
+    );
+
+    return {
+      order,
+      payment: {
+        required: true,
+        ...razorpayOrder,
+      },
+    };
+  }
+
+  // =====================
+  // Cancel order
+  // =====================
+  async cancelOrder(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId, userId },
+      include: { items: true },
+    });
+
+    if (
+      order.orderStatus !== OrderStatus.PENDING &&
+      order.orderStatus !== OrderStatus.PACKED
+    ) {
+      throw new Error('Order cannot be cancelled after dispatch');
+    }
+
+    // DB transaction — status + stock
+    await this.prisma.$transaction(async (tx) => {
+      await tx.order.update({
+        where: { id: orderId },
+        data: { orderStatus: OrderStatus.CANCELLED },
+      });
+
+      for (const item of order.items) {
+        await tx.productVariant.update({
+          where: { id: item.variantId! },
+          data: { stockQuantity: { increment: item.quantity } },
+        });
+      }
+    });
+
+    // Transaction ke baad refund karo
+    // PaymentService decide karega — COD = wallet, Card/UPI = Razorpay
+    if (order.paidAt) {
+      await this.paymentService.initiateRefund(
+        orderId,
+        userId,
+        Number(order.grandTotal),
+      );
+    }
+
+    return { message: 'Order cancelled successfully' };
   }
 
   // =====================
@@ -271,62 +407,13 @@ export class OrderService {
             transactionDetail: true,
           },
         },
+        address: true,
       },
     });
   }
 
   // =====================
-  // Order cancel karo (dispatch se pehle)
-  // =====================
-  async cancelOrder(orderId: string, userId: string) {
-    const order = await this.prisma.order.findUniqueOrThrow({
-      where: { id: orderId, userId },
-      include: { items: true, shipments: true },
-    });
-
-    // Sirf PENDING ya PACKED cancel ho sakta hai
-    if (
-      order.orderStatus !== OrderStatus.PENDING &&
-      order.orderStatus !== OrderStatus.PACKED
-    ) {
-      throw new Error('Order cannot be cancelled after dispatch');
-    }
-
-    return await this.prisma.$transaction(async (tx) => {
-      // Order status update karo
-      await tx.order.update({
-        where: { id: orderId },
-        data: { orderStatus: OrderStatus.CANCELLED },
-      });
-
-      // Stock wapis karo
-      for (const item of order.items) {
-        await tx.productVariant.update({
-          where: { id: item.variantId! },
-          data: { stockQuantity: { increment: item.quantity } },
-        });
-      }
-
-      // Wallet refund karo (COD nahi hoga)
-      const payment = await tx.orderPayment.findFirst({
-        where: { orderId },
-      });
-
-      if (payment) {
-        await this.walletService.refund(
-          userId,
-          Number(order.grandTotal),
-          orderId,
-          tx,
-        );
-      }
-
-      return { message: 'Order cancelled successfully' };
-    });
-  }
-
-  // =====================
-  // Admin — sare orders
+  // Admin — all orders
   // =====================
   async getAllOrders(options: {
     skip?: number;
@@ -376,7 +463,7 @@ export class OrderService {
   }
 
   // =====================
-  // Admin — shipment update (courier API)
+  // Admin — shipment update
   // =====================
   async updateShipment(
     orderId: string,
@@ -392,7 +479,6 @@ export class OrderService {
     });
 
     return await this.prisma.$transaction(async (tx) => {
-      // Shipment update karo
       const updated = await tx.shipment.update({
         where: { id: shipment.id },
         data: {
@@ -409,7 +495,6 @@ export class OrderService {
         },
       });
 
-      // Order status bhi update karo
       const orderStatus = {
         [ShipmentStatus.PROCESSING]: OrderStatus.PENDING,
         [ShipmentStatus.SHIPPED]: OrderStatus.SHIPPED,
@@ -428,7 +513,7 @@ export class OrderService {
   }
 
   // =====================
-  // Admin — tracking event add karo
+  // Admin — tracking event
   // =====================
   async addTrackingEvent(
     orderId: string,
@@ -448,6 +533,111 @@ export class OrderService {
         eventStatus: data.eventStatus,
         location: data.location,
         eventTime: new Date(data.eventTime),
+      },
+    });
+  }
+
+  // =====================
+  // Private: Order DB mein create
+  // =====================
+  private async createOrderInDb(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    addressId: string,
+    data: {
+      orderStatus: OrderStatus;
+      paidAt: Date | null;
+      totalItemsAmount: number;
+      shippingCharge: number;
+      codFee: number;
+      grandTotal: number;
+      cartItems: any[];
+    },
+  ) {
+    return await tx.order.create({
+      data: {
+        orderNumber: this.generateOrderNumber(),
+        userId,
+        addressId,
+        orderStatus: data.orderStatus,
+        totalItemsAmount: data.totalItemsAmount,
+        shippingCharge: data.shippingCharge,
+        codFee: data.codFee,
+        grandTotal: data.grandTotal,
+        placedAt: new Date(),
+        paidAt: data.paidAt,
+        items: {
+          create: data.cartItems.map((item) => ({
+            productId: item.productId,
+            sellerId: item.product.sellerId,
+            variantId: item.variantId,
+            productNameSnapshot: item.product.internalName,
+            productSkuSnapshot: item.variant.sku,
+            quantity: item.quantity,
+            unitPriceAtPurchase: item.variant.sellingPrice,
+            totalPrice: Number(item.variant.sellingPrice) * item.quantity,
+          })),
+        },
+      },
+      include: { items: true },
+    });
+  }
+
+  // =====================
+  // Private: Stock reduce + Cart clear
+  // =====================
+  private async reduceStockAndClearCart(
+    tx: Prisma.TransactionClient,
+    userId: string,
+    cartItems: any[],
+  ) {
+    for (const item of cartItems) {
+      await tx.productVariant.update({
+        where: { id: item.variantId },
+        data: { stockQuantity: { decrement: item.quantity } },
+      });
+    }
+    await tx.cartItem.deleteMany({ where: { userId } });
+  }
+
+  // =====================
+  // Private: Shipment create
+  // =====================
+  private async createShipmentForOrder(
+    order: any,
+    address: any,
+    items: any[],
+    grandTotal: number,
+  ) {
+    const shipmentResponse = await this.shipmentService.createShipment({
+      orderId: order.id,
+      orderNumber: order.orderNumber,
+      address: {
+        name: address.name,
+        phone: address.phoneNumber,
+        addressLine1: address.addressLine1,
+        city: address.city,
+        state: address.state,
+        postalCode: address.postalCode,
+        country: address.country,
+      },
+      items: items.map((item) => ({
+        name: item.product?.internalName ?? item.productNameSnapshot,
+        sku: item.variant?.sku ?? item.productSkuSnapshot,
+        quantity: item.quantity,
+        price: Number(item.variant?.sellingPrice ?? item.unitPriceAtPurchase),
+      })),
+      grandTotal,
+    });
+
+    await this.prisma.shipment.create({
+      data: {
+        orderId: order.id,
+        trackingNumber: shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
+        carrier: shipmentResponse.courier_company_id
+          ? String(shipmentResponse.courier_company_id)
+          : 'Pending',
+        status: ShipmentStatus.PROCESSING,
       },
     });
   }

@@ -177,7 +177,13 @@ export class PaymentService {
   // Handle Webhook  (Razorpay se auto update)
   // =====================
   async handleWebhook(payload: string, signature: string) {
-    // Webhook signature verify karo
+    // in Development
+    if (!this.utilsService.isProductionApp()) {
+      const event = JSON.parse(payload);
+      await this.processWebhookEvent(event);
+      return { success: true };
+    }
+    // Webhook signature verify
     const expectedSignature = crypto
       .createHmac('sha256', this.config.webhookSecret!)
       .update(payload)
@@ -188,28 +194,25 @@ export class PaymentService {
     }
 
     const event = JSON.parse(payload);
-    const { event: eventType, payload: eventPayload } = event;
 
-    switch (eventType) {
-      // Payment success
-      case 'payment.captured':
-        await this.handlePaymentCaptured(eventPayload.payment.entity);
-        break;
-
-      // Payment failed
-      case 'payment.failed':
-        await this.handlePaymentFailed(eventPayload.payment.entity);
-        break;
-
-      // Refund processed
-      case 'refund.processed':
-        await this.handleRefundProcessed(eventPayload.refund.entity);
-        break;
-    }
+    await this.processWebhookEvent(event);
 
     return { success: true };
   }
 
+  private async processWebhookEvent(event: any) {
+    switch (event.event) {
+      case 'payment.captured':
+        await this.handlePaymentCaptured(event.payload.payment.entity);
+        break;
+      case 'payment.failed':
+        await this.handlePaymentFailed(event.payload.payment.entity);
+        break;
+      case 'refund.processed':
+        await this.handleRefundProcessed(event.payload.refund.entity);
+        break;
+    }
+  }
   // =====================
   // Payment captured webhook
   // =====================
@@ -230,9 +233,19 @@ export class PaymentService {
   // Payment failed webhook
   // =====================
   private async handlePaymentFailed(payment: any) {
-    await this.prisma.transactionDetail.updateMany({
-      where: { razorpayOrderId: payment.order_id },
-      data: { transactionStatus: TransactionStatus.FAILED },
+    const orderId = payment.notes?.orderId;
+    await this.prisma.$transaction(async (tx) => {
+      await this.prisma.transactionDetail.updateMany({
+        where: { razorpayOrderId: payment.order_id },
+        data: { transactionStatus: TransactionStatus.FAILED },
+      });
+
+      if (orderId) {
+        await tx.order.update({
+          where: { id: orderId },
+          data: { orderStatus: OrderStatus.AWAITING_PAYMENT },
+        });
+      }
     });
   }
 
@@ -278,8 +291,8 @@ export class PaymentService {
       return;
     }
 
-    // Razorpay refund initiate karo
-    // Webhook se automatically wallet credit hoga
+    // Razorpay refund initiate
+    // Webhook se automatically
     await this.razorpay.payments.refund(transaction.razorpayPaymentId, {
       amount: amount * 100, // paise mein
       notes: { orderId, userId },
