@@ -92,6 +92,7 @@
     "reflect-metadata": "^0.2.2",
     "rimraf": "^6.1.2",
     "rxjs": "^7.8.2",
+    "stripe": "^20.4.1",
     "winston": "^3.18.3",
     "winston-mongodb": "^7.0.1"
   },
@@ -116,6 +117,7 @@
     "@types/passport-jwt": "^4.0.1",
     "@types/passport-local": "^1.0.38",
     "@types/pug": "^2.0.10",
+    "@types/stripe": "^8.0.416",
     "@types/supertest": "^6.0.3",
     "@typescript-eslint/eslint-plugin": "^8.48.1",
     "@typescript-eslint/parser": "^8.48.1",

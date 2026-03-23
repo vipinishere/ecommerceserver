@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { isEmail } from 'class-validator';
 import { admin, categories, CategoryChildren } from './seeds';
 import { PrismaClient } from '../src/generated/prisma/client';
+import { specifications } from './seeds/categories-specification.seed';
 
 const program = new Command();
 program.option('--seed-only <name>', 'Specify a seed name').parse(process.argv);
@@ -69,6 +70,92 @@ async function main() {
     }
 
     console.log('Seeding completed!');
+  }
+
+  console.log(
+    'checking for category attributes, specification group and specification attributes',
+  );
+
+  if (
+    (await prisma.specificationGroup.count()) > 0 &&
+    (await prisma.specificationAttribute.count()) > 0 &&
+    (await prisma.categoryAttribute.count()) > 0
+  ) {
+    console.log(
+      '⚠ Skipping seed for `category attributes, specification group and specification attributes`, due to non-empty category table',
+    );
+  } else {
+    for (const spec of specifications) {
+      const category = await prisma.category.findFirst({
+        where: { name: spec.category },
+      });
+
+      if (!category) {
+        console.log(`Category not found: ${spec.category} — skip`);
+        continue;
+      }
+
+      for (const group of spec.groups) {
+        // SpecificationGroup create/find karo
+        let specGroup = await prisma.specificationGroup.findFirst({
+          where: { name: group.name },
+        });
+
+        if (!specGroup) {
+          specGroup = await prisma.specificationGroup.create({
+            data: {
+              name: group.name,
+              description: group.description,
+            },
+          });
+        }
+        console.log(`  Group: ${specGroup.name}`);
+        for (const attr of group.attributes) {
+          // SpecificationAttribute create/find karo
+          let specAttr = await prisma.specificationAttribute.findFirst({
+            where: {
+              groupId: specGroup.id,
+              name: attr.name,
+            },
+          });
+
+          if (!specAttr) {
+            specAttr = await prisma.specificationAttribute.create({
+              data: {
+                groupId: specGroup.id,
+                name: attr.name,
+                unit: attr.unit,
+                dataType: attr.dataType,
+              },
+            });
+          }
+
+          // CategoryAttribute create karo
+          await prisma.categoryAttribute.upsert({
+            where: {
+              categoryId_attributeId: {
+                categoryId: category.id,
+                attributeId: specAttr.id,
+              },
+            },
+            create: {
+              categoryId: category.id,
+              attributeId: specAttr.id,
+              isRequired: attr.isRequired,
+            },
+            update: {
+              isRequired: attr.isRequired,
+            },
+          });
+
+          console.log(`    Attribute: ${specAttr.name}`);
+        }
+      }
+
+      console.log(`✅ ${spec.category} — specifications seeded`);
+    }
+
+    console.log('Specifications seeding completed!');
   }
 }
 
