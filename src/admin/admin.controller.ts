@@ -2,12 +2,15 @@ import {
   Body,
   Controller,
   Get,
+  Param,
+  ParseEnumPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
+import { ApiBearerAuth, ApiParam, ApiTags } from '@nestjs/swagger';
 import {
   AccessGuard,
   AuthenticatedRequest,
@@ -24,6 +27,12 @@ import {
   UpdateProfileDetailsRequestDto,
   UpdateProfileImageRequestDto,
 } from './dto';
+import { SellerService } from 'src/seller/seller.service';
+import {
+  GetSellersRequestDto,
+  UpdateSellerProfileRequestDto,
+} from 'src/seller/dto';
+import { SellerStatus } from 'src/generated/prisma/enums';
 
 @ApiTags('Admin')
 @ApiBearerAuth()
@@ -85,6 +94,54 @@ export class AdminController extends BaseController {
   ) {
     const ctx = this.getContext(req);
     await this.adminService.authenticate(ctx.user.id, data.password);
+    return { status: 'success' };
+  }
+}
+@ApiTags('Admin Seller')
+@ApiBearerAuth()
+@Roles(UserType.Admin)
+@UseGuards(JwtAuthGuard, AccessGuard, RolesGuard)
+@Controller('admin/sellers')
+export class AdminSellerController extends BaseController {
+  constructor(private readonly sellerService: SellerService) {
+    super();
+  }
+  @Get()
+  async getSellers(@Query() query: GetSellersRequestDto) {
+    return await this.sellerService.getAll({
+      search: query.search,
+      skip: query.skip,
+      take: query.take,
+    });
+  }
+
+  @Get(':sellerId')
+  async getSellerProfile(@Param('sellerId') sellerId: string) {
+    return await this.sellerService.getProfile(sellerId);
+  }
+
+  @Patch(':sellerId')
+  async updateSellerProfileByAdmin(
+    @Param('sellerId') sellerId: string,
+    @Body() data: UpdateSellerProfileRequestDto,
+  ) {
+    return await this.sellerService.updateProfileDetailsByAdministrator({
+      sellerId,
+      businessName: data.businessName,
+      contactEmail: data.contactEmail,
+      dialCode: data.dialCode,
+      contactPhone: data.contactPhone,
+      password: data.password,
+    });
+  }
+
+  @ApiParam({ name: 'status', enum: SellerStatus })
+  @Post(':sellerId/:status')
+  async setSellerStatus(
+    @Param('sellerId') sellerId: string,
+    @Param('status', new ParseEnumPipe(SellerStatus)) status: SellerStatus,
+  ) {
+    await this.sellerService.setStatus(sellerId, status);
     return { status: 'success' };
   }
 }

@@ -64,7 +64,7 @@ export class OrderController {
   retryPayment(
     @Req() req: Request & { user: AuthenticatedUser },
     @Param('orderId') orderId: string,
-    @Body() dto: { paymentType: 'CARD' | 'UPI' },
+    @Body() dto: { paymentType: 'card' | 'upi' },
   ) {
     return this.orderService.retryPaymentForOrder(
       orderId,
