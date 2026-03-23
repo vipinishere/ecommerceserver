@@ -47,7 +47,7 @@ export class WalletController extends BaseController {
   @ApiResponse({ status: 200, type: WalletAccountResponse })
   @Get()
   getWallet(@Req() req: Request & { user: AuthenticatedUser }) {
-    return this.walletService.getWalletById(req.user.id);
+    return this.walletService.getWalletByUserId(req.user.id);
   }
 
   // deposit request

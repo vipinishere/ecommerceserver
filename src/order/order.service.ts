@@ -28,9 +28,7 @@ export class OrderService {
     private readonly paymentService: PaymentService,
   ) {}
 
-  // =====================
   // Order number generate
-  // =====================
   private generateOrderNumber(): string {
     const date = new Date();
     const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
@@ -40,9 +38,7 @@ export class OrderService {
     return `ORD-${dateStr}-${random}`;
   }
 
-  // =====================
   // Validate + Calculate
-  // =====================
   private async validateAndCalculate(
     userId: string,
     addressId: string,
@@ -89,9 +85,7 @@ export class OrderService {
     };
   }
 
-  // =====================
   // COD handler
-  // =====================
   private async handleCodOrder(
     userId: string,
     addressId: string,
@@ -120,9 +114,7 @@ export class OrderService {
     };
   }
 
-  // =====================
   // Wallet handler
-  // =====================
   private async handleWalletOrder(
     userId: string,
     addressId: string,
@@ -159,9 +151,7 @@ export class OrderService {
     };
   }
 
-  // =====================
   // Card/UPI handler
-  // =====================
   private async handlePrepaidOrder(
     userId: string,
     addressId: string,
@@ -178,28 +168,24 @@ export class OrderService {
       return order;
     });
 
-    const razorpayOrder = await this.paymentService.createPaymentOrder(
+    const stripeIntent = await this.paymentService.createOrderPaymentIntent(
       userId,
       order.id,
-      paymentType === PaymentType.CARD ? 'CARD' : 'UPI',
+      paymentType === PaymentType.CARD ? 'card' : 'upi',
     );
 
     return {
       order,
       payment: {
         required: true,
-        ...razorpayOrder,
+        ...stripeIntent,
       },
     };
   }
 
-  // =====================
   // Complete payment (Card/UPI verify + shipment)
-  // =====================
   async completePayment(data: {
-    razorpayOrderId: string;
-    razorpayPaymentId: string;
-    razorpaySignature: string;
+    paymentIntentId: string;
     orderId: string;
     userId: string;
   }) {
@@ -228,9 +214,7 @@ export class OrderService {
     return { success: true, message: 'Payment verified successfully' };
   }
 
-  // =====================
   // Place order (main entry)
-  // =====================
   async placeOrder(
     userId: string,
     data: { addressId: string; paymentType: PaymentType },
@@ -262,13 +246,11 @@ export class OrderService {
     }
   }
 
-  // ================
   // Retry Payment for Order
-  // ================
   async retryPaymentForOrder(
     orderId: string,
     userId: string,
-    paymentType: 'CARD' | 'UPI',
+    paymentType: 'card' | 'upi',
   ) {
     const order = await this.prisma.order.findUniqueOrThrow({
       where: { id: orderId, userId },
@@ -280,7 +262,7 @@ export class OrderService {
     }
 
     // Naya Razorpay order create karo
-    const razorpayOrder = await this.paymentService.createPaymentOrder(
+    const razorpayOrder = await this.paymentService.createOrderPaymentIntent(
       userId,
       orderId,
       paymentType,
@@ -295,9 +277,7 @@ export class OrderService {
     };
   }
 
-  // =====================
   // Cancel order
-  // =====================
   async cancelOrder(orderId: string, userId: string) {
     const order = await this.prisma.order.findUniqueOrThrow({
       where: { id: orderId, userId },
@@ -339,9 +319,7 @@ export class OrderService {
     return { message: 'Order cancelled successfully' };
   }
 
-  // =====================
   // User orders
-  // =====================
   async getUserOrders(
     userId: string,
     options: { skip?: number; take?: number; status?: OrderStatus },
@@ -381,9 +359,7 @@ export class OrderService {
     return { count, skip: pagination.skip, take: pagination.take, data };
   }
 
-  // =====================
   // Single order detail
-  // =====================
   async getOrderById(orderId: string, userId: string) {
     return await this.prisma.order.findUniqueOrThrow({
       where: { id: orderId, userId },
@@ -452,9 +428,7 @@ export class OrderService {
     return { count, skip: pagination.skip, take: pagination.take, data };
   }
 
-  // =====================
   // Admin — order status update
-  // =====================
   async updateOrderStatus(orderId: string, status: OrderStatus) {
     return await this.prisma.order.update({
       where: { id: orderId },
@@ -462,9 +436,7 @@ export class OrderService {
     });
   }
 
-  // =====================
   // Admin — shipment update
-  // =====================
   async updateShipment(
     orderId: string,
     data: {
@@ -512,9 +484,7 @@ export class OrderService {
     });
   }
 
-  // =====================
   // Admin — tracking event
-  // =====================
   async addTrackingEvent(
     orderId: string,
     data: {
@@ -537,9 +507,7 @@ export class OrderService {
     });
   }
 
-  // =====================
   // Private: Order DB mein create
-  // =====================
   private async createOrderInDb(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -583,9 +551,7 @@ export class OrderService {
     });
   }
 
-  // =====================
   // Private: Stock reduce + Cart clear
-  // =====================
   private async reduceStockAndClearCart(
     tx: Prisma.TransactionClient,
     userId: string,
@@ -600,9 +566,7 @@ export class OrderService {
     await tx.cartItem.deleteMany({ where: { userId } });
   }
 
-  // =====================
   // Private: Shipment create
-  // =====================
   private async createShipmentForOrder(
     order: any,
     address: any,

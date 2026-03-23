@@ -77,6 +77,29 @@ export class UsersController extends BaseController {
     return { status: 'success' };
   }
 
+  @Post('me/profile-image')
+  updateProfileImage(
+    @Req() req: AuthenticatedRequest,
+    @Body() data: UpdateProfileImageRequestDto,
+  ) {
+    const ctx = this.getContext(req);
+    return this.usersService.updateProfileImage(ctx.user.id, data.profileImage);
+  }
+
+  @Post('me/change-password')
+  async changePassword(
+    @Req() req: AuthenticatedRequest,
+    @Body() data: ChangePasswordRequestDto,
+  ) {
+    const ctx = this.getContext(req);
+    await this.usersService.changePassword(
+      ctx.user.id,
+      data.oldPassword,
+      data.newPassword,
+    );
+    return { status: 'success' };
+  }
+
   @Roles(UserType.Admin)
   @UseGuards(RolesGuard)
   @Get(':userId')
@@ -100,29 +123,6 @@ export class UsersController extends BaseController {
       primaryNumber: data.primaryNumber,
       password: data.password,
     });
-  }
-
-  @Post('me/profile-image')
-  updateProfileImage(
-    @Req() req: AuthenticatedRequest,
-    @Body() data: UpdateProfileImageRequestDto,
-  ) {
-    const ctx = this.getContext(req);
-    return this.usersService.updateProfileImage(ctx.user.id, data.profileImage);
-  }
-
-  @Post('me/change-password')
-  async changePassword(
-    @Req() req: AuthenticatedRequest,
-    @Body() data: ChangePasswordRequestDto,
-  ) {
-    const ctx = this.getContext(req);
-    await this.usersService.changePassword(
-      ctx.user.id,
-      data.oldPassword,
-      data.newPassword,
-    );
-    return { status: 'success' };
   }
 
   @ApiParam({ name: 'status', enum: UserStatus })

@@ -2,17 +2,9 @@ import { ApiProperty } from '@nestjs/swagger';
 import { IsString } from 'class-validator';
 
 export class VerifyPaymentDto {
-  @ApiProperty({ example: 'order_xxxx' })
+  @ApiProperty({ example: 'paymentIntent Id' })
   @IsString()
-  razorpayOrderId: string;
-
-  @ApiProperty({ example: 'pay_xxxx' })
-  @IsString()
-  razorpayPaymentId: string;
-
-  @ApiProperty({ example: 'signature_xxxx' })
-  @IsString()
-  razorpaySignature: string;
+  paymentIntentId: string;
 
   @ApiProperty({ example: 'uuid-here' })
   @IsString()

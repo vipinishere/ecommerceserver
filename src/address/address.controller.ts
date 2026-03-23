@@ -47,7 +47,7 @@ export class AddressController {
     return this.addressService.getAll(req.user.id);
   }
 
-  // GET /address
+  // GET /address/:addressId
   @ApiOperation({ summary: 'Get single address' })
   @ApiParam({ name: 'addressId', description: 'Address ID' })
   @ApiResponse({ status: 200, type: AddressResponse })

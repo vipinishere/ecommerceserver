@@ -40,6 +40,7 @@ export class CartController extends BaseController {
   }
 
   // POST /cart
+  @ApiOperation({ summary: 'User - Add to cart ' })
   @Post()
   @Roles(UserType.User)
   @UseGuards(RolesGuard)
@@ -52,6 +53,7 @@ export class CartController extends BaseController {
   }
 
   // GET /cart
+  @ApiOperation({ summary: 'User - Get all cart items' })
   @Get()
   @Roles(UserType.User)
   @UseGuards(RolesGuard)
@@ -61,6 +63,7 @@ export class CartController extends BaseController {
   }
 
   // PATCH /cart/:itemId
+  @ApiOperation({ summary: 'User - update quantity of item into cart' })
   @Roles(UserType.User)
   @UseGuards(RolesGuard)
   @Patch(':itemId')
@@ -90,6 +93,7 @@ export class CartController extends BaseController {
   }
 
   // DELETE /cart
+  @ApiOperation({ summary: 'User - Clear the cart' })
   @Roles(UserType.User)
   @UseGuards(RolesGuard)
   @Delete()

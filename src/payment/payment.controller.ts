@@ -16,7 +16,11 @@ import {
 import { AccessGuard, JwtAuthGuard, Roles, RolesGuard } from '@Common';
 import { AuthenticatedUser, UserType } from '@Common';
 import { PaymentService } from './payment.service';
-import { CreatePaymentOrderDto, VerifyPaymentDto } from './dto';
+import {
+  CreateOrderPaymentIntentDto,
+  CreateWalletPaymentIntentDto,
+  VerifyPaymentDto,
+} from './dto';
 
 @ApiTags('Payment')
 @ApiBearerAuth()
@@ -26,16 +30,29 @@ import { CreatePaymentOrderDto, VerifyPaymentDto } from './dto';
 export class PaymentController {
   constructor(private readonly paymentService: PaymentService) {}
 
-  @ApiOperation({ summary: 'Create Razorpay order (prepaid)' })
-  @Post('order')
-  createPaymentOrder(
+  @ApiOperation({ summary: 'Create Stripe Payment Intent for Order (prepaid)' })
+  @Post('intent/order')
+  createPaymentIntentForOrder(
     @Req() req: Request & { user: AuthenticatedUser },
-    @Body() dto: CreatePaymentOrderDto,
+    @Body() dto: CreateOrderPaymentIntentDto,
   ) {
-    return this.paymentService.createPaymentOrder(
+    return this.paymentService.createOrderPaymentIntent(
       req.user.id,
       dto.orderId,
-      dto.paymentType,
+      dto.paymentMethod,
+    );
+  }
+
+  @ApiOperation({ summary: 'Create Stripe Payment Intent for Wallet' })
+  @Post('intent/wallet')
+  createPaymentIntentForWallet(
+    @Req() req: Request & { user: AuthenticatedUser },
+    @Body() body: CreateWalletPaymentIntentDto,
+  ) {
+    return this.paymentService.createWalletPaymentIntent(
+      req.user.id,
+      body.amount,
+      body.paymentMethod,
     );
   }
 
@@ -60,10 +77,10 @@ export class PaymentWebhookController {
   constructor(private readonly paymentService: PaymentService) {}
 
   @ApiExcludeEndpoint() // will not show in Swagger
-  @Post('webhook/razorpay')
+  @Post('webhook/stripe')
   handleWebhook(
     @Req() req: RawBodyRequest<Request>,
-    @Headers('x-razorpay-signature') signature: string,
+    @Headers('stripe-signature') signature: string,
   ) {
     const payload = req.rawBody?.toString() ?? '';
     return this.paymentService.handleWebhook(payload, signature);
