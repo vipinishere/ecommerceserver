@@ -5,6 +5,7 @@ import { ConfigType } from '@nestjs/config';
 import { shipmentConfigFactory } from '@Config';
 import { UtilsService } from '@Common';
 import { PrismaService } from 'src/prisma';
+import axios from 'axios';
 
 const SHIPMENT_TOKEN_CACHE_KEY = 'shiprocket_token';
 
@@ -134,9 +135,17 @@ export class ShipmentService {
   async createShipment(data: {
     orderId: string;
     orderNumber: string;
+    isPaid: boolean;
     address: {
       name: string;
       phone: string;
+      addressLine1: string;
+      city: string;
+      state: string;
+      postalCode: string;
+      country: string;
+    };
+    sellerAddress: {
       addressLine1: string;
       city: string;
       state: string;
@@ -153,9 +162,9 @@ export class ShipmentService {
   }): Promise<ShiprocketShipmentResponse> {
     // Development
     // send mock data on development
-    if (!this.utilsService.isProduction()) {
-      return this.getMockShipmentResponse(data.orderNumber);
-    }
+    // if (!this.utilsService.isProduction()) {
+    //   return this.getMockShipmentResponse(data.orderNumber);
+    // }
 
     // Production
     // call shiprocket API
@@ -166,7 +175,7 @@ export class ShipmentService {
         body: JSON.stringify({
           order_id: data.orderNumber,
           order_date: new Date().toISOString(),
-          pickup_location: 'Primary',
+          pickup_location: data.sellerAddress.state,
           billing_customer_name: data.address.name,
           billing_address: data.address.addressLine1,
           billing_city: data.address.city,
@@ -181,7 +190,7 @@ export class ShipmentService {
             units: item.quantity,
             selling_price: item.price,
           })),
-          payment_method: 'Prepaid',
+          payment_method: data.isPaid ? 'Prepaid' : 'cod',
           sub_total: data.grandTotal,
           length: 10,
           breadth: 10,
@@ -190,6 +199,41 @@ export class ShipmentService {
         }),
       },
     );
+  }
+
+  async getShippingRate(dto: {
+    pickupPincode: string;
+    deliveryPincode: string;
+    weight: number;
+    length?: number;
+    breadth?: number;
+    height?: number;
+    cod: boolean;
+  }) {
+    try {
+      const response = await axios.get(
+        'https://apiv2.shiprocket.in/v1/external/courier/serviceability/',
+        {
+          params: {
+            pickup_postcode: dto.pickupPincode,
+            delivery_postcode: dto.deliveryPincode,
+            cod: dto.cod ? 1 : 0,
+            weight: dto.weight,
+            length: dto.length ? dto.length : '',
+            breadth: dto.breadth ? dto.breadth : '',
+            height: dto.height ? dto.height : '',
+          },
+          headers: {
+            Authorization: `Bearer ${this.getToken()}`,
+          },
+        },
+      );
+      return response;
+    } catch (error) {
+      if (error) {
+        // console.log(error);
+      }
+    }
   }
 
   // =====================

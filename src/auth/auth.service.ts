@@ -148,6 +148,12 @@ export class AuthService {
 
   async registerSeller(data: {
     businessName: string;
+    businessAddressLine1: string;
+    businessAddressLine2?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
     contactEmail: string;
     dialCode: string;
     contactPhone: string;
@@ -168,6 +174,12 @@ export class AuthService {
     // Seller create karo
     const seller = await this.sellerService.create({
       businessName: data.businessName,
+      businessAddressLine1: data.businessAddressLine1,
+      businessAddressLine2: data?.businessAddressLine2,
+      city: data.city,
+      state: data.state,
+      postalCode: data.postalCode,
+      country: data.country,
       contactEmail: data.contactEmail,
       dialCode: data.dialCode,
       contactPhone: data.contactPhone,

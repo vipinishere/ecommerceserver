@@ -230,17 +230,23 @@ model Address {
 }
 
 model Seller {
-  id           String       @id @default(uuid())
-  businessName String       @map("business_name") @db.VarChar(150)
-  contactEmail String       @unique @map("contact_email") @db.VarChar(150)
-  dialCode     String       @map("dial_code") @db.VarChar(3)
-  contactPhone String       @map("contact_phone") @db.VarChar(15)
-  profileImage String?      @map("profile_image")
-  isVerified   Boolean      @default(false) @map("is_verified")
-  status       SellerStatus @default(ACTIVE)
-  createdAt    DateTime     @default(now()) @map("created_at")
-  updatedAt    DateTime     @updatedAt @map("updated_at")
-  meta         SellerMeta?
+  id                   String       @id @default(uuid())
+  businessName         String       @map("business_name") @db.VarChar(150)
+  businessAddressLine1 String       @map("business_address_line1") @db.VarChar(200)
+  businessAddressLine2 String?      @map("business_address_line2") @db.VarChar(200)
+  city                 String       @db.VarChar(100)
+  state                String       @db.VarChar(100)
+  postalCode           String       @map("postal_code") @db.VarChar(10)
+  country              String       @db.VarChar(100)
+  contactEmail         String       @unique @map("contact_email") @db.VarChar(150)
+  dialCode             String       @map("dial_code") @db.VarChar(3)
+  contactPhone         String       @map("contact_phone") @db.VarChar(15)
+  profileImage         String?      @map("profile_image")
+  isVerified           Boolean      @default(false) @map("is_verified")
+  status               SellerStatus @default(ACTIVE)
+  createdAt            DateTime     @default(now()) @map("created_at")
+  updatedAt            DateTime     @updatedAt @map("updated_at")
+  meta                 SellerMeta?
 
   products   Product[]
   orderItems OrderItem[]
@@ -424,6 +430,10 @@ model ProductVariant {
   productId     String   @map("product_id")
   sku           String   @unique @db.VarChar(100)
   variantName   String?  @map("variant_name") @db.VarChar(100)
+  weight        String?  @db.VarChar(50)
+  height        String?  @db.VarChar(50)
+  breadth       String?  @db.VarChar(50)
+  length        String?  @db.VarChar(50)
   color         String?  @db.VarChar(50)
   size          String?  @db.VarChar(50)
   storage       String?  @db.VarChar(50)
@@ -536,11 +546,12 @@ model Order {
   createdAt        DateTime    @default(now()) @map("created_at")
   updatedAt        DateTime    @updatedAt @map("updated_at")
 
-  user      User           @relation(fields: [userId], references: [id])
-  address   Address        @relation(fields: [addressId], references: [id])
-  items     OrderItem[]
-  shipments Shipment[]
-  payments  OrderPayment[]
+  user               User                @relation(fields: [userId], references: [id])
+  address            Address             @relation(fields: [addressId], references: [id])
+  items              OrderItem[]
+  shipments          Shipment[]
+  payments           OrderPayment[]
+  transactionDetails TransactionDetail[]
 
   @@index([userId])
   @@map("order")
@@ -572,6 +583,7 @@ model OrderItem {
 model Shipment {
   id                String         @id @default(uuid())
   orderId           String         @map("order_id")
+  sellerId          String?        @map("seller_id")
   trackingNumber    String         @unique @map("tracking_number")
   carrier           String         @db.VarChar(100)
   status            ShipmentStatus
@@ -725,9 +737,9 @@ model PaymentMethod {
 model TransactionDetail {
   id                    String            @id @default(uuid())
   userId                String            @map("user_id")
+  orderId               String?           @map("order_id")
   paymentMethodId       String            @map("payment_method_id")
   transactionId         String            @unique @map("transaction_id")
-  transactionRefId      String?           @map("transaction_ref_id")
   transactionStatus     TransactionStatus @map("transaction_status")
   stripePaymentIntentId String?           @map("stripe_payment_intent_id")
   stripePaymentStatus   String?           @map("stripe_payment_status")
@@ -735,6 +747,7 @@ model TransactionDetail {
   updatedAt             DateTime          @updatedAt @map("updated_at")
 
   user          User           @relation(fields: [userId], references: [id])
+  order         Order?         @relation(fields: [orderId], references: [id])
   paymentMethod PaymentMethod  @relation(fields: [paymentMethodId], references: [id])
   orderPayments OrderPayment[]
 
@@ -775,6 +788,13 @@ model ReturnPolicy {
   products Product[]
 
   @@map("return_policy")
+}
+
+model WebhookEvent {
+  id        String   @id @default(uuid())
+  eventId   String   @unique
+  type      String
+  createdAt DateTime @default(now())
 }
 
 enum OtpTransport {

@@ -206,6 +206,12 @@ export class SellerService {
 
   async create(data: {
     businessName: string;
+    businessAddressLine1: string;
+    businessAddressLine2?: string;
+    city: string;
+    state: string;
+    postalCode: string;
+    country: string;
     contactEmail: string;
     dialCode: string;
     contactPhone: string;
@@ -223,6 +229,12 @@ export class SellerService {
     return await this.prisma.seller.create({
       data: {
         businessName: data.businessName,
+        businessAddressLine1: data.businessAddressLine1,
+        businessAddressLine2: data?.businessAddressLine2,
+        city: data.city,
+        state: data.state,
+        postalCode: data.postalCode,
+        country: data.country,
         contactEmail: data.contactEmail.toLowerCase(),
         dialCode: data.dialCode,
         contactPhone: data.contactPhone,
