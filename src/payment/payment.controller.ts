@@ -19,7 +19,6 @@ import { PaymentService } from './payment.service';
 import {
   CreateOrderPaymentIntentDto,
   CreateWalletPaymentIntentDto,
-  VerifyPaymentDto,
 } from './dto';
 
 @ApiTags('Payment')
@@ -55,22 +54,10 @@ export class PaymentController {
       body.paymentMethod,
     );
   }
-
-  @ApiOperation({ summary: 'Verify payment signature' })
-  @Post('verify')
-  verifyPayment(
-    @Req() req: Request & { user: AuthenticatedUser },
-    @Body() dto: VerifyPaymentDto,
-  ) {
-    return this.paymentService.verifyPayment({
-      ...dto,
-      userId: req.user.id,
-    });
-  }
 }
 
 // =====================
-// Webhook — Razorpay auto update
+// Webhook — Stripe auto update
 // =====================
 @Controller()
 export class PaymentWebhookController {

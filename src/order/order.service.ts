@@ -1,11 +1,17 @@
-import { Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  UnprocessableEntityException,
+} from '@nestjs/common';
 import { PrismaService } from '../prisma';
 import { WalletService } from '../wallet';
+import { randomUUID } from 'crypto';
 import {
   OrderStatus,
   PaymentType,
   ShipmentStatus,
   Prisma,
+  TransactionStatus,
 } from '../generated/prisma/client';
 import { ShipmentService } from '../shipment';
 import { PaymentService } from '../payment';
@@ -30,12 +36,7 @@ export class OrderService {
 
   // Order number generate
   private generateOrderNumber(): string {
-    const date = new Date();
-    const dateStr = date.toISOString().slice(0, 10).replace(/-/g, '');
-    const random = Math.floor(Math.random() * 1000)
-      .toString()
-      .padStart(3, '0');
-    return `ORD-${dateStr}-${random}`;
+    return `ORD-${randomUUID()}`;
   }
 
   // Validate + Calculate
@@ -44,11 +45,26 @@ export class OrderService {
     addressId: string,
     paymentType: PaymentType,
   ): Promise<CalculatedOrder> {
+    let totalShippingCharge = 0;
     const cartItems = await this.prisma.cartItem.findMany({
       where: { userId },
       include: { product: true, variant: true },
     });
+
     if (cartItems.length === 0) throw new Error('Cart is empty');
+
+    // Group items by seller
+    // const groupedBySeller = cartItems.reduce(
+    //   (acc, item) => {
+    //     const sellerId = item.product.sellerId;
+
+    //     if (!acc[sellerId]) acc[sellerId] = [];
+    //     acc[sellerId].push(item);
+
+    //     return acc;
+    //   },
+    //   {} as Record<string, typeof cartItems>,
+    // );
 
     const address = await this.prisma.address.findUniqueOrThrow({
       where: { id: addressId, userId },
@@ -56,17 +72,61 @@ export class OrderService {
 
     for (const item of cartItems) {
       if (item.variant.stockQuantity < item.quantity) {
-        throw new Error(`Insufficient stock for ${item.product.internalName}`);
+        throw new UnprocessableEntityException(
+          `Insufficient stock for ${item.product.internalName}`,
+        );
+      }
+      if (paymentType === PaymentType.COD) {
+        if (!item.product.isPayOnDelivery) {
+          throw new UnprocessableEntityException(
+            `${item.product.internalName} is not available for COD`,
+          );
+        }
+      }
+
+      if (item.product.isFreeDelivery) {
+        totalShippingCharge += 0;
+      } else {
+        // const charges = Object.keys(groupedBySeller).map(() => 50);
+        // totalShippingCharge = charges.reduce((sum, val) => sum + val, 0);
+        if (totalShippingCharge < 80) {
+          totalShippingCharge += 50;
+        }
       }
     }
+
+    // const shippingPromises = Object.keys(groupedBySeller).map(
+    //   async (sellerId) => {
+    //     const items = groupedBySeller[sellerId];
+
+    //     const seller = await this.prisma.seller.findUnique({
+    //       where: { id: sellerId },
+    //     });
+
+    //     if (!seller) return 0;
+
+    // const totalWeight = items.reduce(
+    //   (sum, item) =>
+    //     sum + Number(item.variant?.weight || 0.5) * item.quantity,
+    //   0,
+    // );
+    // const response = await this.shipmentService.getShippingRate({
+    //   pickupPincode: seller.postalCode,
+    //   deliveryPincode: address.postalCode,
+    //   weight: totalWeight,
+    //   cod: paymentType === PaymentType.COD,
+    // });
+    //     return 50;
+    //   },
+    // );
 
     const totalItemsAmount = cartItems.reduce(
       (sum, item) => sum + Number(item.variant.sellingPrice) * item.quantity,
       0,
     );
-    const shippingCharge = totalItemsAmount > 500 ? 0 : 50;
+
     const codFee = paymentType === PaymentType.COD ? 25 : 0;
-    const grandTotal = totalItemsAmount + shippingCharge + codFee;
+    const grandTotal = totalItemsAmount + totalShippingCharge + codFee;
 
     if (paymentType === PaymentType.WALLET) {
       const wallet = await this.walletService.getWalletByUserId(userId);
@@ -74,13 +134,12 @@ export class OrderService {
         throw new Error('Insufficient wallet balance');
       }
     }
-
     return {
       cartItems,
       address,
       grandTotal,
       totalItemsAmount,
-      shippingCharge,
+      shippingCharge: totalShippingCharge,
       codFee,
     };
   }
@@ -103,9 +162,9 @@ export class OrderService {
 
     await this.createShipmentForOrder(
       order,
+      false,
       data.address,
       data.cartItems,
-      data.grandTotal,
     );
 
     return {
@@ -140,9 +199,9 @@ export class OrderService {
 
     await this.createShipmentForOrder(
       order,
+      true,
       data.address,
       data.cartItems,
-      data.grandTotal,
     );
 
     return {
@@ -164,54 +223,16 @@ export class OrderService {
         orderStatus: OrderStatus.AWAITING_PAYMENT,
         paidAt: null,
       });
-      await this.reduceStockAndClearCart(tx, userId, data.cartItems);
       return order;
     });
-
-    const stripeIntent = await this.paymentService.createOrderPaymentIntent(
-      userId,
-      order.id,
-      paymentType === PaymentType.CARD ? 'card' : 'upi',
-    );
 
     return {
       order,
       payment: {
         required: true,
-        ...stripeIntent,
+        message: 'Proceed to payment',
       },
     };
-  }
-
-  // Complete payment (Card/UPI verify + shipment)
-  async completePayment(data: {
-    paymentIntentId: string;
-    orderId: string;
-    userId: string;
-  }) {
-    // Step 1: PaymentService se verify + markOrderPaid()
-    await this.paymentService.verifyPayment(data);
-
-    // Step 2: Order + address + items fetch
-    const order = await this.prisma.order.findUniqueOrThrow({
-      where: { id: data.orderId, userId: data.userId },
-      include: {
-        items: {
-          include: { product: true, variant: true },
-        },
-        address: true,
-      },
-    });
-
-    // Step 3: Shipment create karo
-    await this.createShipmentForOrder(
-      order,
-      order.address,
-      order.items,
-      Number(order.grandTotal),
-    );
-
-    return { success: true, message: 'Payment verified successfully' };
   }
 
   // Place order (main entry)
@@ -246,6 +267,31 @@ export class OrderService {
     }
   }
 
+  async checkPaymentSuccess(orderId: string, paymentIntentId: string) {
+    const order = await this.prisma.order.findUnique({
+      where: { id: orderId },
+    });
+
+    if (!order) throw new BadRequestException();
+
+    if (!order.paidAt && order.orderStatus === OrderStatus.AWAITING_PAYMENT) {
+      return { success: false, message: 'payment not successed yet' };
+    }
+    const transactionDetails = await this.prisma.transactionDetail.findFirst({
+      where: {
+        orderId,
+        stripePaymentIntentId: paymentIntentId,
+        stripePaymentStatus: 'succeeded',
+        transactionStatus: TransactionStatus.SUCCESS,
+      },
+    });
+
+    if (!transactionDetails) {
+      return { success: false, message: 'payment failed' };
+    }
+    return { success: true, message: 'payment success' };
+  }
+
   // Retry Payment for Order
   async retryPaymentForOrder(
     orderId: string,
@@ -261,8 +307,8 @@ export class OrderService {
       throw new Error('Order is not awaiting payment');
     }
 
-    // Naya Razorpay order create karo
-    const razorpayOrder = await this.paymentService.createOrderPaymentIntent(
+    // create new payment intent for order
+    const stripeIntent = await this.paymentService.createOrderPaymentIntent(
       userId,
       orderId,
       paymentType,
@@ -272,7 +318,7 @@ export class OrderService {
       order,
       payment: {
         required: true,
-        ...razorpayOrder,
+        ...stripeIntent,
       },
     };
   }
@@ -307,7 +353,7 @@ export class OrderService {
     });
 
     // Transaction ke baad refund karo
-    // PaymentService decide karega — COD = wallet, Card/UPI = Razorpay
+    // PaymentService decide karega — COD = wallet, Card/UPI = Stripe
     if (order.paidAt) {
       await this.paymentService.initiateRefund(
         orderId,
@@ -529,9 +575,9 @@ export class OrderService {
         addressId,
         orderStatus: data.orderStatus,
         totalItemsAmount: data.totalItemsAmount,
-        shippingCharge: data.shippingCharge,
+        shippingCharge: Number(data.shippingCharge),
         codFee: data.codFee,
-        grandTotal: data.grandTotal,
+        grandTotal: Number(data.grandTotal),
         placedAt: new Date(),
         paidAt: data.paidAt,
         items: {
@@ -569,40 +615,93 @@ export class OrderService {
   // Private: Shipment create
   private async createShipmentForOrder(
     order: any,
+    isPaid: boolean,
     address: any,
     items: any[],
-    grandTotal: number,
   ) {
-    const shipmentResponse = await this.shipmentService.createShipment({
-      orderId: order.id,
-      orderNumber: order.orderNumber,
-      address: {
-        name: address.name,
-        phone: address.phoneNumber,
-        addressLine1: address.addressLine1,
-        city: address.city,
-        state: address.state,
-        postalCode: address.postalCode,
-        country: address.country,
-      },
-      items: items.map((item) => ({
-        name: item.product?.internalName ?? item.productNameSnapshot,
-        sku: item.variant?.sku ?? item.productSkuSnapshot,
-        quantity: item.quantity,
-        price: Number(item.variant?.sellingPrice ?? item.unitPriceAtPurchase),
-      })),
-      grandTotal,
-    });
+    // ✅ group by seller
+    const groupedBySeller = items.reduce(
+      (acc, item) => {
+        const sellerId = item.product.sellerId;
 
-    await this.prisma.shipment.create({
-      data: {
-        orderId: order.id,
-        trackingNumber: shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
-        carrier: shipmentResponse.courier_company_id
-          ? String(shipmentResponse.courier_company_id)
-          : 'Pending',
-        status: ShipmentStatus.PROCESSING,
+        if (!acc[sellerId]) acc[sellerId] = [];
+        acc[sellerId].push(item);
+
+        return acc;
       },
-    });
+      {} as Record<string, any[]>,
+    );
+
+    // ✅ loop per seller
+    for (const sellerId in groupedBySeller) {
+      const sellerItems = groupedBySeller[sellerId];
+
+      const seller = await this.prisma.seller.findUnique({
+        where: { id: sellerId },
+      });
+
+      if (!seller) continue;
+
+      // ✅ check existing shipment per seller
+      const existingShipment = await this.prisma.shipment.findFirst({
+        where: {
+          orderId: order.id,
+          sellerId: sellerId,
+        },
+      });
+
+      if (existingShipment) continue;
+
+      // ✅ create shipment per seller
+      const shipmentResponse = await this.shipmentService.createShipment({
+        orderId: order.id,
+        orderNumber: order.orderNumber,
+        isPaid,
+        address: {
+          name: address.name,
+          phone: address.phoneNumber,
+          addressLine1: address.addressLine1,
+          city: address.city,
+          state: address.state,
+          postalCode: address.postalCode,
+          country: address.country,
+        },
+        sellerAddress: {
+          addressLine1: seller.businessAddressLine1,
+          city: seller.city,
+          state: seller.state,
+          postalCode: seller.postalCode,
+          country: seller.country,
+        },
+        items: sellerItems.map((item: any) => ({
+          name: item.product?.internalName ?? item.productNameSnapshot,
+          sku: item.variant?.sku ?? item.productSkuSnapshot,
+          quantity: item.quantity,
+          price: Number(item.variant?.sellingPrice ?? item.unitPriceAtPurchase),
+        })),
+
+        grandTotal: sellerItems.reduce(
+          (sum: number, item: any) =>
+            sum +
+            Number(item.variant?.sellingPrice ?? item.unitPriceAtPurchase) *
+              item.quantity,
+          0,
+        ),
+      });
+
+      // ✅ save shipment
+      await this.prisma.shipment.create({
+        data: {
+          orderId: order.id,
+          sellerId: sellerId,
+          trackingNumber:
+            shipmentResponse.awb_code ?? `TRK-${order.orderNumber}`,
+          carrier: shipmentResponse.courier_company_id
+            ? String(shipmentResponse.courier_company_id)
+            : 'Pending',
+          status: ShipmentStatus.PROCESSING,
+        },
+      });
+    }
   }
 }

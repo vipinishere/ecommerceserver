@@ -29,7 +29,6 @@ export class PaymentService {
   }
 
   // Create Stripe Payment Intent for Order
-  // =====================
   async createOrderPaymentIntent(
     userId: string,
     orderId: string,
@@ -42,6 +41,30 @@ export class PaymentService {
 
     // Already paid?
     if (order.paidAt) throw new Error('Order already paid');
+
+    // ✅ Check existing pending transaction for this order
+    const existingTransaction = await this.prisma.transactionDetail.findFirst({
+      where: {
+        orderId,
+        transactionStatus: TransactionStatus.PENDING,
+        stripePaymentIntentId: { not: null },
+      },
+    });
+
+    if (existingTransaction?.stripePaymentIntentId) {
+      const existingIntent = await this.stripe.paymentIntents.retrieve(
+        existingTransaction.stripePaymentIntentId,
+      );
+
+      return {
+        clientSecret: existingIntent.client_secret,
+        paymentIntentId: existingIntent.id,
+        amount: existingIntent.amount,
+        currency: existingIntent.currency,
+        orderId,
+        publishableKey: process.env.STRIPE_PUBLISHABLE_KEY,
+      };
+    }
 
     // Create Stripe payment intent
     const paymentIntent = await this.stripe.paymentIntents.create({
@@ -57,7 +80,12 @@ export class PaymentService {
     });
 
     // create transaction details with pending status update after payment success
-    await this.createTransactionDetail(userId, paymentMethod, paymentIntent.id);
+    await this.createTransactionDetail(
+      userId,
+      paymentMethod,
+      paymentIntent.id,
+      orderId,
+    );
 
     return {
       clientSecret: paymentIntent.client_secret,
@@ -102,8 +130,9 @@ export class PaymentService {
     userId: string,
     PaymentMethod: 'card' | 'upi',
     paymentIntentId: string,
+    orderId?: string,
   ) {
-    const method = await this.prisma.paymentMethod.findFirst({
+    let method = await this.prisma.paymentMethod.findFirst({
       where: {
         userId,
         paymentType:
@@ -111,10 +140,21 @@ export class PaymentService {
       },
     });
 
+    if (!method) {
+      method = await this.prisma.paymentMethod.create({
+        data: {
+          userId,
+          paymentType:
+            PaymentMethod === 'card' ? PaymentType.CARD : PaymentType.UPI,
+        },
+      });
+    }
+
     if (method) {
       await this.prisma.transactionDetail.create({
         data: {
           userId,
+          orderId,
           paymentMethodId: method.id,
           transactionId: paymentIntentId,
           stripePaymentIntentId: paymentIntentId,
@@ -126,24 +166,38 @@ export class PaymentService {
 
   async handleWebhook(payload: string, signature: string) {
     let event: Stripe.Event;
-    if (!this.utilsService.isProductionApp()) {
-      try {
-        event = JSON.parse(payload) as Stripe.Event;
-      } catch {
-        throw new Error('Invalid webhook payload');
-      }
-    } else {
-      try {
-        event = this.stripe.webhooks.constructEvent(
-          payload,
-          signature,
-          this.config.webhookSecret!,
-        );
-      } catch {
-        throw new Error('Invalid webhook signature');
-      }
+    // if (!this.utilsService.isProductionApp()) {
+    //   try {
+    //     event = JSON.parse(payload) as Stripe.Event;
+    //   } catch {
+    //     throw new Error('Invalid webhook payload');
+    //   }
+    // } else {}
+    try {
+      event = this.stripe.webhooks.constructEvent(
+        payload,
+        signature,
+        this.config.webhookSecret!,
+      );
+    } catch {
+      throw new Error('Invalid webhook signature');
     }
+
+    const existingEvent = await this.prisma.webhookEvent.findUnique({
+      where: { eventId: event.id },
+    });
+
+    if (existingEvent) {
+      return { success: true, message: 'event already processed' };
+    }
+    // process webhook event
     await this.processWebhookEvent(event);
+
+    // update in db about webhook is processed before or not
+    await this.prisma.webhookEvent.create({
+      data: { eventId: event.id, type: event.type },
+    });
+
     return { success: true };
   }
 
@@ -196,6 +250,9 @@ export class PaymentService {
           stripePaymentIntentId: paymentIntent.id,
           stripePaymentStatus: paymentIntent.status,
         });
+
+        // ✅ NEW: Fulfillment after payment
+        await this.handlePostPaymentSuccess(orderId, userId);
         break;
       // wallet deposit
       case 'wallet':
@@ -214,6 +271,55 @@ export class PaymentService {
         console.log(`Unknown payment type in metadata: ${type}`);
         break;
     }
+  }
+
+  private async handlePostPaymentSuccess(orderId: string, userId: string) {
+    const order = await this.prisma.order.findUniqueOrThrow({
+      where: { id: orderId },
+      include: {
+        items: true,
+        address: true,
+      },
+    });
+
+    await this.prisma.$transaction(async (tx) => {
+      // ✅ 1. Reduce stock
+      for (const item of order.items) {
+        const updated = await tx.productVariant.update({
+          where: { id: item.variantId!, stockQuantity: { gte: item.quantity } },
+          data: { stockQuantity: { decrement: item.quantity } },
+        });
+
+        if (updated.stockQuantity === 0) {
+          throw new Error(`Insufficient stock for variant ${item.variantId}`);
+        }
+      }
+
+      // ✅ 2. Clear cart
+      await tx.cartItem.deleteMany({
+        where: { userId },
+      });
+    });
+
+    // ✅ 3. Create shipment
+    await this.createShipmentAfterPayment(order);
+  }
+
+  private async createShipmentAfterPayment(order: any) {
+    const existingShipment = await this.prisma.shipment.findFirst({
+      where: { orderId: order.id },
+    });
+
+    if (existingShipment) return;
+
+    await this.prisma.shipment.create({
+      data: {
+        orderId: order.id,
+        trackingNumber: `TRK-${order.orderNumber}`,
+        carrier: 'Pending',
+        status: 'PROCESSING',
+      },
+    });
   }
 
   private async markOrderPaid(
@@ -311,43 +417,6 @@ export class PaymentService {
     await this.walletService.refund(userId, amount, orderId);
   }
 
-  async verifyPayment(data: {
-    paymentIntentId: string;
-    orderId: string;
-    userId: string;
-  }) {
-    // Stripe se PaymentIntent fetch karo
-    const paymentIntent = await this.stripe.paymentIntents.retrieve(
-      data.paymentIntentId,
-    );
-
-    switch (paymentIntent.status) {
-      case 'succeeded':
-        // Payment complete — markOrderPaid karo
-        await this.markOrderPaid(data.orderId, data.userId, {
-          stripePaymentIntentId: paymentIntent.id,
-          stripePaymentStatus: paymentIntent.status,
-        });
-        break;
-
-      case 'processing':
-        throw new Error('Payment is still processing, please wait');
-
-      case 'requires_payment_method':
-      case 'requires_action':
-        // Payment incomplete
-        throw new Error('Payment incomplete, please retry');
-
-      case 'canceled':
-        throw new Error('Payment was canceled');
-
-      default:
-        throw new Error(`Payment status: ${paymentIntent.status}`);
-    }
-
-    return { success: true };
-  }
-
   async initiateRefund(
     orderId: string,
     userId: string,
@@ -355,7 +424,7 @@ export class PaymentService {
   ): Promise<void> {
     const transaction = await this.prisma.transactionDetail.findFirst({
       where: {
-        orderPayments: { some: { orderId } },
+        orderId,
         transactionStatus: TransactionStatus.SUCCESS,
       },
     });

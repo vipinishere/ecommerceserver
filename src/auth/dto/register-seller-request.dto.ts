@@ -2,9 +2,11 @@ import { ApiProperty } from '@nestjs/swagger';
 import {
   IsEmail,
   IsNotEmpty,
+  IsOptional,
   IsString,
   Length,
   Matches,
+  MaxLength,
 } from 'class-validator';
 
 export class RegisterSellerDto {
@@ -28,6 +30,43 @@ export class RegisterSellerDto {
       'Password must have uppercase, lowercase, number and special character',
   })
   password: string;
+
+  @ApiProperty({ description: 'Address Line 1' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  businessAddressLine1: string;
+
+  @ApiProperty({ description: 'Address Line 2' })
+  @IsOptional()
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  businessAddressLine2: string;
+
+  @ApiProperty({ description: 'City' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  city: string;
+
+  @ApiProperty({ description: 'State' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  state: string;
+
+  @ApiProperty({ description: 'PostalCode' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  postalCode: string;
+
+  @ApiProperty({ description: 'Country' })
+  @IsString()
+  @IsNotEmpty()
+  @MaxLength(200)
+  country: string;
 
   @ApiProperty({ example: '+91' })
   @IsString()

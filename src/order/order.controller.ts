@@ -24,8 +24,8 @@ import {
   OrderQueryDto,
   UpdateShipmentDto,
   AddTrackingEventDto,
+  CheckPaymentSuccessDto,
 } from './dto';
-import { VerifyPaymentDto } from 'src/payment/dto';
 
 // =====================
 // User routes
@@ -47,18 +47,19 @@ export class OrderController {
     return this.orderService.placeOrder(req.user.id, dto);
   }
 
-  @ApiOperation({ summary: 'Complete payment after Razorpay checkout' })
-  @Post('complete-payment')
-  completePayment(
+  @ApiOperation({ summary: 'check payment is success or not' })
+  @Post('check-payment')
+  checkPaymentSuccess(
     @Req() req: Request & { user: AuthenticatedUser },
-    @Body() dto: VerifyPaymentDto,
+    @Body() dto: CheckPaymentSuccessDto,
   ) {
-    return this.orderService.completePayment({
-      ...dto,
-      userId: req.user.id,
-    });
+    return this.orderService.checkPaymentSuccess(
+      dto.orderId,
+      dto.paymentIntentId,
+    );
   }
 
+  //
   @ApiOperation({ summary: 'Retry failed payment' })
   @Post(':orderId/retry-payment')
   retryPayment(
